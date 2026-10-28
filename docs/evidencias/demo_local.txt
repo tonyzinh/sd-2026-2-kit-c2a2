@@ -1,0 +1,7 @@
+== saude ==
+{"status":"ok","documentos":0,"fila":{"na_fila":0,"sem_ack":0,"mortos":0}}
+== indexando documentos/ (assincrono, via fila Redis) ==
+{"lote":"9c4ef49bafb5","estado":"pendente","documentos":3,"status_url":"/indexar/9c4ef49bafb5"}
+status do lote: {"lote":"9c4ef49bafb5","estado":"concluido","documentos":"3","tentativas":"0","novos":"3","total":"3"}
+== pergunta: o que diz o teorema CAP? ==
+{"pergunta":"o que diz o teorema CAP?","resposta":"[MODO SIMULADO - sem LLM_API_KEY configurada]\nPergunta: o que diz o teorema CAP?\nCom base nos documentos recuperados: O teorema CAP afirma que, diante de uma particao de rede, um sistema distribuido precisa escolher entre consistencia e disponibilidade. Como particoes acontecem de fato, a escolha real e entre C e A. Um sistema distribuido e um conjunto de computadores independentes que cooperam e se apresentam ao usuario como um sistema unico. O principal desafio e a falha parcial: uma parte pode falhar enquanto o resto continua.","contexto":["O teorema CAP afirma que, diante de uma particao de rede, um sistema distribuido precisa escolher entre consistencia e disponibilidade. Como particoes acontecem de fato, a escolha real e entre C e A.","Um sistema distribuido e um conjunto de computadores independentes que cooperam e se apresentam ao usuario como um sistema unico. O principal desafio e a falha parcial: uma parte pode falhar enquanto o resto continua."],"fontes":["teorema_cap.txt","sistemas_distribuidos.txt"]}
