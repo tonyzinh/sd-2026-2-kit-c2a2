@@ -1,7 +1,96 @@
+# docker compose up --build   -> sobe tudo do zero, offline (LLM simulado se LLM_API_KEY vazia)
+x-saude-http: &saude-http
+  interval: 5s
+  timeout: 3s
+  retries: 10
+  start_period: 5s
+
 services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
-  # TAREFA 4: acrescente aqui os tres servicos (ingestao, recuperacao, geracao)
-  # depois de escrever um Dockerfile para cada um.
+  ingestao:
+    build: { context: ., dockerfile: servicos/ingestao/Dockerfile }
+    ports: ["8001:8001"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      INDICE_PATH: /data/indice.json
+      DOCUMENTOS_DIR: /app/documentos
+    volumes: [indice:/data]
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      <<: *saude-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/saude', timeout=2)"]
+    restart: unless-stopped
+
+  worker-ingestao:
+    build: { context: ., dockerfile: servicos/ingestao/Dockerfile.worker }
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      INDICE_PATH: /data/indice.json
+      WORKER_HEARTBEAT: /tmp/worker.hb
+    volumes: [indice:/data]   # mesmo volume da API: o worker escreve, a API le
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      # o worker nao tem HTTP: confere se o batimento foi atualizado nos ultimos 30s
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.hb')<30 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  recuperacao:
+    build: { context: ., dockerfile: servicos/recuperacao/Dockerfile }
+    ports: ["8002:8002"]
+    environment:
+      URL_INGESTAO: http://ingestao:8001
+    depends_on:
+      ingestao: { condition: service_healthy }
+    healthcheck:
+      <<: *saude-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/saude', timeout=2)"]
+    restart: unless-stopped
+
+  geracao:
+    build: { context: ., dockerfile: servicos/geracao/Dockerfile }
+    ports: ["8003:8003"]
+    environment:
+      URL_RECUPERACAO: http://recuperacao:8002
+      # a chave NUNCA vai no codigo: defina no ambiente/.env (vazia = modo simulado)
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_URL: ${LLM_API_URL:-https://api.openai.com/v1/chat/completions}
+      LLM_MODELO: ${LLM_MODELO:-gpt-4o-mini}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-20}
+      BREAKER_LIMITE_FALHAS: ${BREAKER_LIMITE_FALHAS:-3}
+      BREAKER_ESPERA: ${BREAKER_ESPERA:-20}
+      # injecao de falha para a demonstracao do disjuntor (so age se o arquivo existir)
+      LLM_SIMULAR_FALHA_ARQUIVO: /tmp/llm_falha
+    depends_on:
+      recuperacao: { condition: service_healthy }
+    healthcheck:
+      <<: *saude-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/saude', timeout=2)"]
+    restart: unless-stopped
+
+  # Opcional: docker compose --profile seed up seed   (indexa documentos/ e sai)
+  seed:
+    profiles: ["seed"]
+    build: { context: ., dockerfile: servicos/ingestao/Dockerfile }
+    command: ["python", "scripts/seed.py", "http://ingestao:8001"]
+    volumes: ["./scripts:/app/scripts:ro"]
+    depends_on:
+      ingestao: { condition: service_healthy }
+      worker-ingestao: { condition: service_healthy }
+
+volumes:
+  indice:
