@@ -241,42 +241,9 @@ Além dos testes unitários, o sistema foi exercitado em execução real:
 
 ---
 
-# Enunciado original do kit
-
-## Como você será avaliado
-
-| Critério | Pontos |
-|---|---|
-| Arquitetura e decomposição em serviços | 1,5 |
-| Comunicação funcionando (REST / gRPC / mensageria) | 1,5 |
-| Resiliência e tratamento de falhas | 1,0 |
-| Execução reproduzível (README, container, deploy) | 1,0 |
-| **Sofisticação do modelo de IA** | **não pontua** |
-| **Total** | **5,0** |
-
-**Entrega:** no seu repositório do GitHub, **sem apresentação oral**. Grupos livres.
-
----
-
 ## Aulas de referência
 
 - **Aula 8** — Mensageria, eventos e API Gateway
 - **Aula 10** — Replicação, consistência e CAP
 - **Aula 11** — Consenso (Raft) e resiliência: circuit breaker
 - **Aula 6** — IA como serviço (vocabulário: embedding, inferência, LLM)
-
----
-
-## Dúvidas frequentes
-
-**Preciso saber machine learning?** Não. O modelo já está pronto e você só chama uma função.
-
-**E se eu não tiver internet no laboratório?** Tudo neste kit funciona offline. O modelo é
-treinado localmente e o cliente de LLM tem modo simulado.
-
-**Posso trocar a linguagem?** O kit é em Python porque é o ecossistema usado nas aulas.
-Se quiser usar outra linguagem, converse com o professor antes.
-
-**Posso usar IA para me ajudar a programar?** Sim. Este é um trabalho prático feito fora de
-sala, e usar ferramentas de IA é realista. O que se avalia é o **sistema funcionando** e as
-**decisões de arquitetura** — que você precisa saber explicar.
