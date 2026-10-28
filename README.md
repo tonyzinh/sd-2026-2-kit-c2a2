@@ -66,7 +66,7 @@ sequenceDiagram
 
 | Serviço | Porta | Rotas |
 |---|---|---|
-| **Ingestão** | 8001 | `POST /indexar[?sincrono=true]` (202 + lote), `GET /indexar/{lote}`, `POST /indexar-arquivos`, `GET /indice[?vetores=false]`, `GET /saude` |
+| **Ingestão** | 8001 | `POST /indexar[?sincrono=true]` (202 + lote; sem Redis cai para 200 + `aviso`, síncrono), `GET /indexar/{lote}`, `POST /indexar-arquivos`, `GET /indice[?vetores=false]`, `GET /saude` |
 | **Worker de ingestão** | — | consome `fila:ingestao` (sem HTTP; healthcheck por batimento) |
 | **Recuperação** | 8002 | `POST /buscar` → `{"resultados":[{texto, origem, score}]}`, `GET /saude` |
 | **Geração** | 8003 | `POST /perguntar` → `{pergunta, resposta, contexto, fontes}`, `GET /saude` (estado do disjuntor) |
@@ -136,7 +136,7 @@ resposta, contexto e fontes.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt                   # requirements.txt tem versões pinadas p/ Python 3.11
+pip install -r requirements-dev.txt                   # testado em Python 3.11 (Docker) e 3.12
 bash scripts/dev_local.sh                             # Redis falso (fakeredis) + 3 serviços + worker
 SEM_SUBIR=1 bash scripts/demo.sh
 ```
@@ -164,10 +164,22 @@ lido tanto pelo `docker compose` quanto pelos serviços rodando localmente
 (`python-dotenv`; o ambiente do shell tem prioridade). Sem `LLM_API_KEY`, o modo
 simulado é usado.
 
+### Configuração (variáveis de ambiente)
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `LLM_API_KEY` / `LLM_API_URL` / `LLM_MODELO` | vazio / OpenAI / `gpt-4o-mini` | vazio = modo simulado, offline |
+| `LLM_TIMEOUT` / `LLM_TENTATIVAS` | 20 s / 3 | timeout por tentativa e nº de tentativas (retry) |
+| `BREAKER_LIMITE_FALHAS` / `BREAKER_ESPERA` | 3 / 20 s | falhas (já com retries esgotados) para abrir e espera até testar |
+| `TOP_K` / `SCORE_MINIMO` | 3 / 0,05 | trechos enviados ao LLM e score mínimo de relevância |
+| `URL_INGESTAO` / `URL_RECUPERACAO` | `localhost:8001` / `:8002` | no compose usam o DNS dos serviços |
+| `REDIS_URL` / `FILA_MAX_TENTATIVAS` | `redis://localhost:6379/0` / 3 | broker e tentativas antes da DLQ |
+| `INDICE_PATH` / `DOCUMENTOS_DIR` | `dados/indice.json` / `documentos` | índice persistido e pasta de `.txt` |
+
 ### Testes
 
 ```bash
-pytest -q                       # unitários: breaker, retry/backoff, busca, ingestão, fila/DLQ, API
+pytest -q                       # 36 testes: breaker, retry/backoff, busca, ingestão, fila/DLQ, API
 python scripts/avaliar.py       # avaliação simples da recuperação (precisão@1), com tudo no ar
 ```
 
@@ -195,6 +207,24 @@ CMD_LIGAR_FALHA="scripts/dev_ctl.sh ligar-falha" CMD_DESLIGAR_FALHA="scripts/dev
 CMD_XADD_INVALIDO="scripts/dev_ctl.sh xadd-invalido" scripts/teste_falhas.sh
 ```
 
+## O que foi verificado
+
+Além dos testes unitários, o sistema foi exercitado em execução real:
+
+- `docker compose up --build --wait` a partir de um clone limpo do GitHub: 5 containers
+  saudáveis; o índice sobrevive a `down && up`.
+- Fila: com o worker parado o lote fica retido (`XLEN=1`, índice vazio) e é processado ao
+  religar; lote inválido → 3 tentativas → DLQ; `kill -9` no worker durante o processamento
+  deixa a mensagem pendente (sem ack) e outro worker a retoma via `XAUTOCLAIM`, sem perda
+  nem duplicata. Testado também contra um Redis 6.2 real fora do Docker.
+- Resiliência: timeout cortando um endpoint lento; retry só em 5xx/429/timeout/conexão
+  (400/401 não repetem); ciclo `fechado → aberto → meio → fechado`; 20 requisições
+  paralelas sem estado inconsistente.
+- Sem internet (namespace de rede só com loopback): o modo simulado funciona e, com chave
+  mas sem rede, a Geração degrada (502 → circuito aberto → 503) sem cair.
+- A chamada ao LLM real foi validada contra um servidor HTTP local compatível com a API da
+  OpenAI; **não** foi exercitada com um provedor real (sem chave no ambiente de teste).
+
 ## Limitações conhecidas
 
 - O índice é um único arquivo JSON relido por inteiro a cada mudança: serve para
@@ -206,6 +236,7 @@ CMD_XADD_INVALIDO="scripts/dev_ctl.sh xadd-invalido" scripts/teste_falhas.sh
 - TF-IDF é lexical (não entende sinônimos); trocar por sentence-transformers manteria a
   interface `ajustar/vetorizar`, mas exige download e foge do modo offline.
 - Reranking e sentence-transformers não foram implementados.
+- O disjuntor protege apenas o LLM; a queda da Recuperação/Ingestão vira 503 por requisição.
 - Extensões feitas: citação de fontes e avaliação automática simples (`scripts/avaliar.py`).
 
 ---
