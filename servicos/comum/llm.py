@@ -8,6 +8,7 @@ contexto recuperado. Assim o kit funciona no laboratorio sem internet.
 IMPORTANTE: nunca escreva a chave no codigo. Use variavel de ambiente.
 """
 import os
+import random
 
 import requests
 
@@ -15,6 +16,23 @@ API_KEY = os.getenv("LLM_API_KEY", "")
 API_URL = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
 MODELO = os.getenv("LLM_MODELO", "gpt-4o-mini")
 TIMEOUT = float(os.getenv("LLM_TIMEOUT", "20"))
+
+
+def _injetar_falha():
+    """Injecao de falha OPCIONAL, so para demonstrar o disjuntor (padrao: desligada).
+
+    LLM_SIMULAR_FALHA=1            -> toda chamada falha
+    LLM_SIMULAR_FALHA_TAXA=0.7     -> 70% das chamadas falham
+    LLM_SIMULAR_FALHA_ARQUIVO=/p   -> falha enquanto o arquivo /p existir
+                                      (permite ligar/desligar sem reiniciar)
+    Lancam ConnectionError, que e um erro transitorio (exercita retry + breaker).
+    """
+    arquivo = os.getenv("LLM_SIMULAR_FALHA_ARQUIVO", "")
+    taxa = float(os.getenv("LLM_SIMULAR_FALHA_TAXA", "0") or 0)
+    if (os.getenv("LLM_SIMULAR_FALHA", "") in ("1", "true")
+            or (arquivo and os.path.exists(arquivo))
+            or (taxa > 0 and random.random() < taxa)):
+        raise requests.ConnectionError("falha simulada do LLM")
 
 
 def _simulado(pergunta, contexto):
@@ -28,6 +46,7 @@ def _simulado(pergunta, contexto):
 
 def gerar(pergunta: str, contexto: list) -> str:
     """Monta o prompt com o contexto recuperado e chama o LLM."""
+    _injetar_falha()
     if not API_KEY:
         return _simulado(pergunta, contexto)
 
