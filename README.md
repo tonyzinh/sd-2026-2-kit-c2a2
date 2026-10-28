@@ -40,7 +40,7 @@ sequenceDiagram
     W->>R: XACK + status "concluido" (só após persistir)
     C->>I: GET /indexar/{lote}
     I-->>C: {estado: concluido, novos, total}
-    Note over W,R: falhou? re-enfileira com tentativas+1; na 3ª vai p/ fila:ingestao:dlq
+    Note over W,R: falhou? re-enfileira com tentativas+1, na 3ª vai p/ fila:ingestao:dlq
 ```
 
 ### Pergunta (síncrona)
