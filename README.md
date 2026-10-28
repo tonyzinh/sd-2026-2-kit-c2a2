@@ -133,11 +133,12 @@ resposta, contexto e fontes.
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt                   # requirements.txt tem versões pinadas p/ Python 3.11
-scripts/dev_local.sh                                  # Redis falso (fakeredis) + 3 serviços + worker
-SEM_SUBIR=1 scripts/demo.sh
+bash scripts/dev_local.sh                             # Redis falso (fakeredis) + 3 serviços + worker
+SEM_SUBIR=1 bash scripts/demo.sh
 ```
 
-Com um Redis real instalado, rode manualmente (cada um em um terminal):
+Com um Redis real instalado, rode manualmente (cada um em um terminal; `cp .env.example .env`
+é opcional e já vale aqui):
 
 ```bash
 uvicorn servicos.ingestao.app:app --port 8001
@@ -146,11 +147,18 @@ uvicorn servicos.recuperacao.app:app --port 8002
 uvicorn servicos.geracao.app:app --port 8003
 ```
 
+> **Roteiro do kit (só os 3 `uvicorn`, sem Redis/worker):** `POST /indexar` continua
+> funcionando — sem Redis a Ingestão degrada para indexação síncrona (200 + `"aviso"`),
+> então o passo 6 do kit e a pergunta do passo 7 funcionam. Com Redis + worker no ar, o
+> mesmo endpoint responde 202 e passa pela fila.
+
 ### LLM real (opcional)
 
 Defina variáveis de ambiente — **nunca no código**. Copie `.env.example` para `.env`
-(ignorado pelo git) e preencha `LLM_API_KEY`, `LLM_API_URL`, `LLM_MODELO`; o compose lê
-o `.env` automaticamente. Sem `LLM_API_KEY`, o modo simulado é usado.
+(ignorado pelo git) e preencha `LLM_API_KEY`, `LLM_API_URL`, `LLM_MODELO`. O `.env` é
+lido tanto pelo `docker compose` quanto pelos serviços rodando localmente
+(`python-dotenv`; o ambiente do shell tem prioridade). Sem `LLM_API_KEY`, o modo
+simulado é usado.
 
 ### Testes
 
