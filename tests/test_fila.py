@@ -117,11 +117,13 @@ def test_indexar_sincrono(cli):
     assert resp.status_code == 200 and resp.json() == {"indexados": 1, "novos": 1}
 
 
-def test_redis_fora_do_ar_da_503(cli, monkeypatch):
+def test_redis_fora_do_ar_indexa_sincrono(cli, monkeypatch):
     import redis
 
     def quebra(*a, **k):
         raise redis.ConnectionError("down")
     monkeypatch.setattr(ing.fila, "publicar", quebra)
-    assert cli.post("/indexar", json=[{"texto": "x", "origem": "a"}]).status_code == 503
+    resp = cli.post("/indexar", json=[{"texto": "x", "origem": "a"}])
+    assert resp.status_code == 200 and resp.json()["novos"] == 1 and "aviso" in resp.json()
+    assert cli.get("/indice").json()["total"] == 1
     assert cli.get("/saude").status_code == 200

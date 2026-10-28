@@ -3,7 +3,8 @@ Servico 1 - INGESTAO: recebe documentos, gera embeddings e armazena.
 
 POST /indexar responde 202 e publica o lote em fila:ingestao (Redis Streams);
 o worker (servicos/ingestao/worker.py) consome, reajusta o TF-IDF e persiste o
-indice em arquivo (INDICE_PATH). Use ?sincrono=true para indexar na hora.
+indice em arquivo (INDICE_PATH). Use ?sincrono=true para indexar na hora; se o
+Redis estiver fora do ar, /indexar cai para esse modo (200 + "aviso").
 O indice e recarregado do arquivo ao iniciar e a cada mudanca feita pelo worker.
 
 Rodar: uvicorn servicos.ingestao.app:app --port 8001
@@ -48,8 +49,11 @@ def _enfileirar_ou_indexar(docs, sincrono):
     try:
         lote = fila.publicar(get_redis(), docs)
     except (redis.ConnectionError, redis.TimeoutError) as e:
-        log.error("redis indisponivel ao publicar: %s", e)
-        raise HTTPException(503, "fila indisponivel (Redis); use ?sincrono=true ou tente depois")
+        # degradacao: sem fila, indexa na hora (o indice deduplica, entao e seguro)
+        log.warning("redis indisponivel (%s); indexando de forma sincrona", e)
+        r = indice.adicionar(docs)
+        return JSONResponse({"indexados": r["total"], "novos": r["novos"],
+                             "aviso": "fila indisponivel (Redis); indexado de forma sincrona"})
     log.info("lote %s enfileirado (%d docs)", lote, len(docs))
     return JSONResponse(status_code=202, content={
         "lote": lote, "estado": "pendente", "documentos": len(docs),
