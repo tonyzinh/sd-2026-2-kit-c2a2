@@ -78,3 +78,21 @@ def test_cache_invalidado_quando_total_muda(monkeypatch, cli):
 def test_sem_termos_em_comum_nao_devolve_lixo(monkeypatch, cli):
     fingir_indice(monkeypatch, ITENS)
     assert cli.post("/buscar", json={"pergunta": "receita culinaria bolo"}).json()["resultados"] == []
+
+
+def test_fora_do_dominio_so_com_palavras_funcionais_nao_devolve_nada(monkeypatch, cli):
+    fingir_indice(monkeypatch, ITENS)
+    for pergunta in ("qual a receita de bolo de chocolate?", "quem ganhou a copa de 2002?", "a"):
+        assert cli.post("/buscar", json={"pergunta": pergunta}).json()["resultados"] == []
+
+
+def test_acentos_nao_atrapalham(monkeypatch, cli):
+    fingir_indice(monkeypatch, ITENS)
+    res = cli.post("/buscar", json={"pergunta": "como o Raft elege um líder?"}).json()["resultados"]
+    assert res and res[0]["origem"] == "raft.txt"
+
+
+def test_score_minimo_filtra_trechos_fracos(monkeypatch, cli):
+    fingir_indice(monkeypatch, ITENS)
+    monkeypatch.setattr(mod, "SCORE_MINIMO", 0.99)
+    assert cli.post("/buscar", json={"pergunta": "teorema CAP"}).json()["resultados"] == []

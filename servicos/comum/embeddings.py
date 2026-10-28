@@ -13,10 +13,23 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
+# Palavras funcionais do portugues (sem acento, pois strip_accents age antes): sem elas,
+# "qual a receita de bolo?" casaria com qualquer texto por causa de "de", "a", "qual".
+STOPWORDS_PT = [
+    "a", "as", "o", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
+    "em", "no", "na", "nos", "nas", "por", "para", "com", "sem", "sobre", "ao", "aos",
+    "e", "ou", "mas", "que", "se", "como", "qual", "quais", "quem", "quando", "onde",
+    "porque", "quanto", "quantos", "ele", "ela", "eles", "elas", "seu", "sua", "seus",
+    "suas", "isso", "isto", "esse", "essa", "este", "esta", "ser", "e", "eh", "foi", "sao",
+    "ha", "ja", "mais", "muito", "tambem", "entre", "ate", "pelo", "pela", "diz", "fala",
+]
+
+
 class Vetorizador:
 
     def __init__(self):
-        self._tfidf = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+        self._tfidf = TfidfVectorizer(ngram_range=(1, 2), min_df=1, strip_accents="unicode",
+                                      stop_words=STOPWORDS_PT)
         self._ajustado = False
 
     def ajustar(self, textos):

@@ -24,6 +24,7 @@ log = configurar_logs("recuperacao")
 app = FastAPI(title="Recuperacao - C2.A2")
 instalar_request_id(app)
 URL_INGESTAO = os.getenv("URL_INGESTAO", "http://localhost:8001")
+SCORE_MINIMO = float(os.getenv("SCORE_MINIMO", "0.05"))  # abaixo disso o trecho nao e relevante
 
 _lock = threading.Lock()
 _cache = {"chave": None, "vetorizador": None, "itens": [], "vetores": []}
@@ -67,7 +68,7 @@ def _preparar(dados):
 
 @app.post("/buscar")
 def buscar(consulta: Consulta):
-    """Devolve os top_k trechos mais parecidos com a pergunta (score > 0)."""
+    """Devolve os top_k trechos mais parecidos com a pergunta (score >= SCORE_MINIMO)."""
     dados = _obter_indice()
     if not dados["itens"]:
         return {"resultados": []}
@@ -76,7 +77,7 @@ def buscar(consulta: Consulta):
         return {"resultados": []}
     q = vet.vetorizar(consulta.pergunta)
     pontuados = [(similaridade(q, v), i) for v, i in zip(vetores, itens)]
-    pontuados = [p for p in pontuados if p[0] > 0]
+    pontuados = [p for p in pontuados if p[0] > 0 and p[0] >= SCORE_MINIMO]
     pontuados.sort(key=lambda p: p[0], reverse=True)
     resultados = [{"texto": i["texto"], "origem": i["origem"], "score": round(s, 4)}
                   for s, i in pontuados[:consulta.top_k]]

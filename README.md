@@ -98,7 +98,9 @@ aberto → **503 + `Retry-After`**. Nunca um 500 com stack trace.
    pergunta e itens com o mesmo vocabulário. O resultado fica em cache, invalidado
    quando `(total, versao)` do índice muda. Assim os dois lados nunca ficam
    inconsistentes, e a Recuperação não depende do formato interno da Ingestão.
-   Itens com score 0 (nenhum termo em comum) não são devolvidos.
+   O TF-IDF ignora acentos e palavras funcionais do português ("de", "qual", "que"…),
+   para que perguntas fora do domínio ("receita de bolo") não casem com os documentos por
+   ruído. Itens com score abaixo de `SCORE_MINIMO` (0,05) não são devolvidos.
 5. **Ordem retry × breaker:** `disjuntor.chamar(com_retentativas(gerar))`. O retry fica
    **por dentro**: um solavanco isolado (timeout, 429, 5xx, ConnectionError) é absorvido
    por retentativas com **backoff exponencial + jitter** (0,5 s·2ⁿ, teto 5 s, 3
