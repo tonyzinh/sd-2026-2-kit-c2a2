@@ -1,0 +1,33 @@
+### (a) LLM simulado: nenhuma chamada externa, o sistema segue de pe
+HTTP/1.1 200 OK
+{"pergunta":"o que diz o teorema CAP?","resposta":"[MODO SIMULADO - sem LLM_API_KEY configurada]\nPergunta: o que diz o teorema CAP?\nCom base nos documentos recuperados: O teorema CAP afirma que, diante de uma particao de rede, u
+  /saude geracao: {"status":"ok","disjuntor":{"estado":"fechado","falhas":0,"limite_falhas":3,"espera_segundos":8.0,"reabre_em_segundos":0.0}}
+
+### (b) recuperacao fora do ar -> erro claro (503), nao 500
+HTTP/1.1 503 Service Unavailable
+{"detail":"servico de recuperacao indisponivel; tente novamente"}
+
+### (c) LLM falhando: o circuito abre apos N falhas, passa por 'meio' e volta a 'fechado'
+-- chamada 1 (falha do LLM, retries esgotados):
+HTTP/1.1 502 Bad Gateway
+{"detail":"falha ao chamar o LLM"}
+-- chamada 2 (falha do LLM, retries esgotados):
+HTTP/1.1 502 Bad Gateway
+{"detail":"falha ao chamar o LLM"}
+-- chamada 3 (falha do LLM, retries esgotados):
+HTTP/1.1 502 Bad Gateway
+{"detail":"falha ao chamar o LLM"}
+  /saude geracao: {"status":"ok","disjuntor":{"estado":"aberto","falhas":3,"limite_falhas":3,"espera_segundos":8.0,"reabre_em_segundos":8.0}}
+-- chamada seguinte (circuito aberto, recusada na hora):
+HTTP/1.1 503 Service Unavailable
+retry-after: 4
+{"detail":"LLM temporariamente indisponivel (disjuntor aberto); tente novamente em 4s"}
+  /saude geracao: {"status":"ok","disjuntor":{"estado":"aberto","falhas":3,"limite_falhas":3,"espera_segundos":8.0,"reabre_em_segundos":3.7}}
+-- aguardando 8.0s (espera do disjuntor)...
+-- chamada de teste (estado 'meio' -> sucesso -> 'fechado'):
+HTTP/1.1 200 OK
+{"pergunta":"o que diz o teorema CAP?","resposta":"[MODO SIMULADO - sem LLM_API_KEY configurada]\nPergunta: o que diz o teorema CAP?\nCom base nos documentos recuperados: O teorema CAP afirma que, diante de uma particao de rede, u
+  /saude geracao: {"status":"ok","disjuntor":{"estado":"fechado","falhas":0,"limite_falhas":3,"espera_segundos":8.0,"reabre_em_segundos":0.0}}
+
+### (d) mensagem invalida na fila -> reenfileirada e, apos 3 falhas, vai para a DLQ
+  /saude ingestao: {"status":"ok","documentos":4,"fila":{"na_fila":0,"sem_ack":0,"mortos":1}}

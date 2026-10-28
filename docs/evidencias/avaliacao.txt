@@ -1,0 +1,5 @@
+[OK] 'o que diz o teorema CAP?' -> teorema_cap.txt (esperado teorema_cap.txt)
+[OK] 'escolha entre consistencia e disponibilidade na particao' -> teorema_cap.txt (esperado teorema_cap.txt)
+[OK] 'como o Raft elege um lider?' -> consenso_raft.txt (esperado consenso_raft.txt)
+[OK] 'o que e um sistema distribuido?' -> sistemas_distribuidos.txt (esperado sistemas_distribuidos.txt)
+precisao@1 = 4/4

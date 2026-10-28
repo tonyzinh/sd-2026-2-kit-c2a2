@@ -1,0 +1,9 @@
+2026-10-28 14:06:53,856 WARNING [retry] [rid=287e93dc8a39] erro transitorio (ConnectionError); tentativa 1/3, nova em 0.46s
+2026-10-28 14:06:54,312 WARNING [retry] [rid=287e93dc8a39] erro transitorio (ConnectionError); tentativa 2/3, nova em 0.36s
+2026-10-28 14:06:58,807 WARNING [retry] [rid=52c8417100de] erro transitorio (ConnectionError); tentativa 1/3, nova em 0.33s
+2026-10-28 14:06:59,134 WARNING [retry] [rid=52c8417100de] erro transitorio (ConnectionError); tentativa 2/3, nova em 0.41s
+2026-10-28 14:07:03,721 WARNING [retry] [rid=a0cd22dfb093] erro transitorio (ConnectionError); tentativa 1/3, nova em 0.36s
+2026-10-28 14:07:04,079 WARNING [retry] [rid=a0cd22dfb093] erro transitorio (ConnectionError); tentativa 2/3, nova em 0.61s
+2026-10-28 14:07:04,688 WARNING [disjuntor] [rid=a0cd22dfb093] disjuntor[llm]: fechado -> aberto (falhas=3)
+2026-10-28 14:07:23,271 WARNING [disjuntor] [rid=dd6e1ae77927] disjuntor[llm]: aberto -> meio (falhas=3)
+2026-10-28 14:07:23,271 WARNING [disjuntor] [rid=dd6e1ae77927] disjuntor[llm]: meio -> fechado (falhas=0)

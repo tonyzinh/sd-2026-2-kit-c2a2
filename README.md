@@ -1,89 +1,204 @@
-# Kit de Partida — C2.A2: RAG Distribuído em Microsserviços
+# RAG Distribuído em Microsserviços — C2.A2
 
 **Sistemas Distribuídos e Computação em Nuvem · FAESA · 2026/2**
-Prof. Howard Cruz Roatti · Lançado na Aula 8 (24/09) · Entrega na Aula 12 (29/10)
 
----
+Sistema de perguntas e respostas sobre documentos próprios (RAG) decomposto em **três
+microsserviços + um worker**, comunicando-se por **REST** e por uma **fila Redis Streams**,
+com **circuit breaker + retry com backoff** protegendo a dependência externa (LLM).
+Roda 100 % offline: sem `LLM_API_KEY` o cliente de LLM entra em modo simulado.
 
-## O que é isto
+## Arquitetura
 
-RAG (geração aumentada por recuperação) permite que um modelo de linguagem responda
-com base em documentos **seus**, sem retreinar nada. Do ponto de vista de sistemas
-distribuídos é um caso perfeito: **três responsabilidades distintas** que conversam
-entre si, com uma **dependência externa lenta e instável** (a API do LLM) que precisa
-ser protegida.
+```mermaid
+flowchart LR
+    U([Cliente]) -->|POST /indexar 202| ING[Ingestão :8001]
+    U -->|POST /perguntar| GER[Geração :8003]
+    ING -->|XADD fila:ingestao| R[(Redis Streams)]
+    R -->|XREADGROUP / XACK| W[Worker de ingestão]
+    R -. 3 falhas .-> DLQ[(fila:ingestao:dlq)]
+    W -->|grava atômico| V[(Volume: indice.json)]
+    ING -->|lê| V
+    GER -->|POST /buscar REST| REC[Recuperação :8002]
+    REC -->|GET /indice REST| ING
+    GER -->|disjuntor + retry + timeout| LLM{{LLM externo}}
+```
 
-> **Sobre a IA neste trabalho:** todo contato com inteligência artificial aqui é
-> **chamada de biblioteca ou de API**. Você **não vai treinar modelos** nem precisar de
-> matemática de aprendizado de máquina. O modelo já vem pronto e configurado.
-> A sua nota vem da **engenharia distribuída**: arquitetura, comunicação, resiliência e
-> execução reproduzível — a sofisticação do modelo **não pontua**.
+### Ingestão (assíncrona, via fila)
 
----
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant I as Ingestão (API)
+    participant R as Redis Streams
+    participant W as Worker
+    participant V as Volume (indice.json)
+    C->>I: POST /indexar [docs]
+    I->>R: XADD fila:ingestao (lote)
+    I-->>C: 202 {lote}
+    W->>R: XREADGROUP (consumer group)
+    W->>V: dedup por hash + reajusta TF-IDF + grava (tmp + os.replace)
+    W->>R: XACK + status "concluido" (só após persistir)
+    C->>I: GET /indexar/{lote}
+    I-->>C: {estado: concluido, novos, total}
+    Note over W,R: falhou? re-enfileira com tentativas+1; na 3ª vai p/ fila:ingestao:dlq
+```
 
-## Como começar
+### Pergunta (síncrona)
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant G as Geração
+    participant B as Recuperação
+    participant I as Ingestão
+    participant L as LLM
+    C->>G: POST /perguntar (X-Request-ID)
+    G->>B: POST /buscar (X-Request-ID)
+    B->>I: GET /indice?vetores=false (X-Request-ID)
+    I-->>B: textos + origem
+    B-->>G: top_k [{texto, origem, score}]
+    G->>L: disjuntor( retry( gerar ) )
+    L-->>G: resposta
+    G-->>C: {pergunta, resposta, contexto, fontes}
+```
+
+## Serviços, portas e rotas
+
+| Serviço | Porta | Rotas |
+|---|---|---|
+| **Ingestão** | 8001 | `POST /indexar[?sincrono=true]` (202 + lote), `GET /indexar/{lote}`, `POST /indexar-arquivos`, `GET /indice[?vetores=false]`, `GET /saude` |
+| **Worker de ingestão** | — | consome `fila:ingestao` (sem HTTP; healthcheck por batimento) |
+| **Recuperação** | 8002 | `POST /buscar` → `{"resultados":[{texto, origem, score}]}`, `GET /saude` |
+| **Geração** | 8003 | `POST /perguntar` → `{pergunta, resposta, contexto, fontes}`, `GET /saude` (estado do disjuntor) |
+| Redis | 6379 | fila (Streams) |
+
+Erros claros: Ingestão fora → Recuperação responde **503**; Recuperação fora → Geração
+responde **503** (ou **502** se ela devolver erro interno); LLM falhando → **502**; circuito
+aberto → **503 + `Retry-After`**. Nunca um 500 com stack trace.
+
+## Decisões de projeto (o que explicar na entrega)
+
+1. **Por que fila na ingestão?** Indexar é custoso (reajusta o TF-IDF e regrava todos os
+   vetores) e não precisa de resposta imediata. A fila desacopla a API do processamento:
+   a API responde 202 na hora, absorve picos e o worker processa no seu ritmo.
+   A consulta (`/perguntar`) é síncrona porque o usuário espera a resposta.
+2. **Redis Streams** (e não lista): consumer group + `XACK` dá entrega *ao menos uma vez*.
+   O `XACK` só ocorre **depois** de o índice ser persistido; se o worker morrer no meio,
+   a mensagem fica pendente e é retomada (na reinicialização do consumidor ou via
+   `XAUTOCLAIM`). Como a indexação deduplica por hash, reprocessar é inofensivo
+   (idempotência). Falhas → re-enfileira com `tentativas+1`; na 3ª vai para a **DLQ**.
+3. **Onde mora o índice:** arquivo JSON em volume compartilhado entre API e worker.
+   Escrita **atômica** (arquivo temporário + `fsync` + `os.replace`) sob um lock de
+   arquivo, então um leitor nunca vê arquivo pela metade; a API detecta mudanças do
+   worker pelo `mtime` e recarrega. É simples e suficiente aqui; veja limitações.
+4. **Vocabulário TF-IDF:** o vocabulário/IDF depende do corpus inteiro e muda a cada
+   ingestão (a dimensão dos vetores muda). A Ingestão reajusta sobre o corpus completo e
+   reindexa todos os itens. A **Recuperação não usa esses vetores**: ela pede
+   `/indice?vetores=false` (só textos), reajusta um `Vetorizador` **local** e vetoriza
+   pergunta e itens com o mesmo vocabulário. O resultado fica em cache, invalidado
+   quando `(total, versao)` do índice muda. Assim os dois lados nunca ficam
+   inconsistentes, e a Recuperação não depende do formato interno da Ingestão.
+   Itens com score 0 (nenhum termo em comum) não são devolvidos.
+5. **Ordem retry × breaker:** `disjuntor.chamar(com_retentativas(gerar))`. O retry fica
+   **por dentro**: um solavanco isolado (timeout, 429, 5xx, ConnectionError) é absorvido
+   por retentativas com **backoff exponencial + jitter** (0,5 s·2ⁿ, teto 5 s, 3
+   tentativas) e **não** conta para o disjuntor; só quando os retries se esgotam é que
+   conta **uma** falha. Assim o disjuntor mede "o LLM está realmente fora?" e não ruído, e
+   quando está aberto ele evita multiplicar chamadas (e esperas) inúteis. Erros 4xx
+   (exceto 429) não são repetidos. O timeout por tentativa é `LLM_TIMEOUT` (20 s).
+6. **Parâmetros do breaker:** abre após **3** falhas (já com retries esgotados) e espera
+   **20 s** antes de testar (`BREAKER_LIMITE_FALHAS`, `BREAKER_ESPERA`). No estado
+   `meio` passa **uma única** chamada de teste (as demais recebem 503); `threading.Lock`
+   protege o estado porque o uvicorn atende em várias threads; cada transição é
+   logada. `/saude` expõe estado, falhas, limite e segundos até reabrir.
+7. **Rastreamento:** `X-Request-ID` é gerado (ou herdado) na entrada, repassado
+   Geração → Recuperação → Ingestão e impresso em todos os logs (`[rid=...]`).
+
+## Como rodar
+
+### Com Docker (reprodutível, offline)
 
 ```bash
-# 1. Clone o kit e entre na pasta
-git clone https://github.com/howardroatti/sd-2026-2-kit-c2a2.git
-cd sd-2026-2-kit-c2a2
-
-# 2. Crie e ative o ambiente virtual
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-source .venv/bin/activate
-
-# 3. Instale as dependências
-pip install -r requirements.txt
+docker compose up --build            # redis, ingestao, worker-ingestao, recuperacao, geracao
+SEM_SUBIR=1 scripts/demo.sh          # (outro terminal) indexa documentos/ pela fila e pergunta
+# ou só indexar: docker compose --profile seed up seed
 ```
+
+`scripts/demo.sh` (sem `SEM_SUBIR`, ele próprio roda `docker compose up -d --build --wait`)
+indexa `documentos/`, espera o worker e pergunta "o que diz o teorema CAP?", mostrando
+resposta, contexto e fontes.
+
+### Localmente (sem Docker)
 
 ```bash
-# 4. Copie o arquivo de ambiente (funciona offline sem chave de LLM)
-cp .env.example .env
-
-# 5. Suba os três serviços, cada um em um terminal
-uvicorn servicos.ingestao.app:app     --port 8001
-uvicorn servicos.recuperacao.app:app  --port 8002
-uvicorn servicos.geracao.app:app      --port 8003
-
-# 6. Indexe os documentos de teste
-curl -X POST http://localhost:8001/indexar -H "Content-Type: application/json" \
-  -d '[{"texto":"O teorema CAP trata de consistencia e disponibilidade.","origem":"aula11"}]'
-
-# 7. Pergunte (funciona depois da TAREFA 2)
-curl -X POST http://localhost:8003/perguntar -H "Content-Type: application/json" \
-  -d '{"pergunta":"o que diz o teorema CAP?"}'
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt                   # requirements.txt tem versões pinadas p/ Python 3.11
+scripts/dev_local.sh                                  # Redis falso (fakeredis) + 3 serviços + worker
+SEM_SUBIR=1 scripts/demo.sh
 ```
+
+Com um Redis real instalado, rode manualmente (cada um em um terminal):
+
+```bash
+uvicorn servicos.ingestao.app:app --port 8001
+python -m servicos.ingestao.worker
+uvicorn servicos.recuperacao.app:app --port 8002
+uvicorn servicos.geracao.app:app --port 8003
+```
+
+### LLM real (opcional)
+
+Defina variáveis de ambiente — **nunca no código**. Copie `.env.example` para `.env`
+(ignorado pelo git) e preencha `LLM_API_KEY`, `LLM_API_URL`, `LLM_MODELO`; o compose lê
+o `.env` automaticamente. Sem `LLM_API_KEY`, o modo simulado é usado.
+
+### Testes
+
+```bash
+pytest -q                       # unitários: breaker, retry/backoff, busca, ingestão, fila/DLQ, API
+python scripts/avaliar.py       # avaliação simples da recuperação (precisão@1), com tudo no ar
+```
+
+### Demonstração de falhas
+
+```bash
+scripts/teste_falhas.sh | tee docs/evidencias/teste_falhas.txt
+```
+
+Cobre: (a) LLM simulado funciona sem internet; (b) `docker compose stop recuperacao` →
+`/perguntar` devolve 503 claro; (c) injeção de falha no LLM → após 3 falhas o circuito
+abre (503 + `Retry-After`), passa por `meio` após a espera e volta a `fechado`;
+(d) lote inválido na fila → 3 tentativas → DLQ.
+
+A injeção de falha é opcional e desligada por padrão: `LLM_SIMULAR_FALHA=1`,
+`LLM_SIMULAR_FALHA_TAXA=0.7` ou `LLM_SIMULAR_FALHA_ARQUIVO` (falha enquanto o arquivo
+existir; o compose usa `/tmp/llm_falha`, ligado/desligado sem reiniciar o container).
+
+Sem Docker, aponte os comandos do script para `scripts/dev_ctl.sh`:
+
+```bash
+LLM_SIMULAR_FALHA_ARQUIVO=dados/llm_falha BREAKER_ESPERA=8 scripts/dev_local.sh &
+CMD_PARAR_REC="scripts/dev_ctl.sh parar-rec" CMD_INICIAR_REC="scripts/dev_ctl.sh iniciar-rec" \
+CMD_LIGAR_FALHA="scripts/dev_ctl.sh ligar-falha" CMD_DESLIGAR_FALHA="scripts/dev_ctl.sh desligar-falha" \
+CMD_XADD_INVALIDO="scripts/dev_ctl.sh xadd-invalido" scripts/teste_falhas.sh
+```
+
+## Limitações conhecidas
+
+- O índice é um único arquivo JSON relido por inteiro a cada mudança: serve para
+  centenas/milhares de trechos, não para milhões (para isso, um banco vetorial).
+- O estado do disjuntor é por processo da Geração (réplicas não o compartilham).
+- A Recuperação baixa os textos do índice a cada consulta para detectar mudanças
+  (`total`/`versao`); só reconstrói os vetores quando eles mudam.
+- A fila é *ao menos uma vez*; a idempotência vem da deduplicação por hash.
+- TF-IDF é lexical (não entende sinônimos); trocar por sentence-transformers manteria a
+  interface `ajustar/vetorizar`, mas exige download e foge do modo offline.
+- Reranking e sentence-transformers não foram implementados.
+- Extensões feitas: citação de fontes e avaliação automática simples (`scripts/avaliar.py`).
 
 ---
 
-## Estrutura do projeto
-
-```
-sd-2026-2-kit-c2a2/
-├── servicos/
-│   ├── comum/
-│   │   ├── embeddings.py       # PRONTO - vetorização offline
-│   │   ├── llm.py              # PRONTO - com modo simulado
-│   │   └── circuit_breaker.py  # PRONTO - modelo de referência
-│   ├── ingestao/app.py         # TAREFA 1
-│   ├── recuperacao/app.py      # TAREFA 2
-│   └── geracao/app.py          # TAREFA 3
-├── documentos/                 # base de teste para indexar
-├── docker-compose.yml          # TAREFA 4
-└── TAREFAS.md                  # <- comece por aqui
-```
-
----
-
-## O que você precisa fazer
-
-Abra o arquivo **`TAREFAS.md`**: ele lista o núcleo obrigatório item a item, indicando
-o arquivo e a aula de referência de cada um.
-
----
+# Enunciado original do kit
 
 ## Como você será avaliado
 
