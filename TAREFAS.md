@@ -29,6 +29,6 @@
 
 ## Antes de entregar
 
-- [ ] Desligue a internet: o modo simulado do LLM mantem o sistema de pe?
-- [ ] Derrube o servico de recuperacao: o disjuntor abre como esperado?
-- [ ] A chave da API esta FORA do codigo (em variavel de ambiente)?
+- [x] Desligue a internet: o modo simulado do LLM mantem o sistema de pe?
+- [x] Derrube o servico de recuperacao: a Geracao responde 503 claro e nao quebra? E com o LLM fora, o disjuntor abre?
+- [x] A chave da API esta FORA do codigo (em variavel de ambiente)?
