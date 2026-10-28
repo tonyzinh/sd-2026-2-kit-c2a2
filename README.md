@@ -74,7 +74,9 @@ sequenceDiagram
 
 Erros claros: Ingestão fora → Recuperação responde **503**; Recuperação fora → Geração
 responde **503** (ou **502** se ela devolver erro interno); LLM falhando → **502**; circuito
-aberto → **503 + `Retry-After`**. Nunca um 500 com stack trace.
+aberto → **503 + `Retry-After`**. Nunca um 500 com stack trace. Quando o LLM falha
+(502/503), o corpo da resposta ainda traz `contexto` e `fontes` (os trechos recuperados) com
+`resposta: null`: a recuperação segue útil mesmo com o LLM fora do ar.
 
 ## Decisões de projeto (o que explicar na entrega)
 

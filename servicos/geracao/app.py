@@ -69,6 +69,10 @@ def perguntar(p: Pergunta):
                 "resposta": "Nao encontrei documentos relevantes para responder.",
                 "contexto": [], "fontes": []}
 
+    # degradacao: se o LLM falhar, o erro HTTP continua claro (503/502), mas o corpo
+    # ainda entrega os trechos recuperados, para o cliente nao ficar de maos vazias.
+    parcial = {"pergunta": p.pergunta, "resposta": None,
+               "contexto": contexto, "fontes": fontes}
     try:
         resposta = disjuntor.chamar(com_retentativas, gerar, p.pergunta, contexto,
                                     tentativas=LLM_TENTATIVAS)
@@ -78,10 +82,11 @@ def perguntar(p: Pergunta):
         return JSONResponse(
             status_code=503, headers={"Retry-After": str(espera)},
             content={"detail": "LLM temporariamente indisponivel (disjuntor aberto); "
-                               f"tente novamente em {espera}s"})
+                               f"tente novamente em {espera}s", **parcial})
     except Exception as e:
         log.error("falha ao chamar o LLM apos retentativas: %s", e)
-        raise HTTPException(502, "falha ao chamar o LLM")
+        return JSONResponse(status_code=502,
+                            content={"detail": "falha ao chamar o LLM", **parcial})
 
     return {"pergunta": p.pergunta, "resposta": resposta,
             "contexto": contexto, "fontes": fontes}

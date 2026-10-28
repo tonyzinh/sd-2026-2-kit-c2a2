@@ -188,6 +188,18 @@ def test_circuito_aberto_vira_503_com_retry_after(monkeypatch, cli):
     assert s["estado"] == "aberto" and s["falhas"] == 2 and s["reabre_em_segundos"] > 0
 
 
+def test_llm_fora_do_ar_ainda_devolve_os_trechos(monkeypatch, cli):
+    fingir_recuperacao(monkeypatch, [{"texto": "trecho cap", "origem": "cap.txt", "score": 1}])
+    monkeypatch.setenv("LLM_SIMULAR_FALHA", "1")
+    r = cli.post("/perguntar", json={"pergunta": "q"})              # retries esgotados
+    assert r.status_code == 502 and r.json()["contexto"] == ["trecho cap"]
+    assert r.json()["fontes"] == ["cap.txt"] and r.json()["resposta"] is None
+    for _ in range(2):
+        r = cli.post("/perguntar", json={"pergunta": "q"})
+    assert r.status_code == 503 and "Retry-After" in r.headers   # circuito aberto
+    assert r.json()["contexto"] == ["trecho cap"] and r.json()["resposta"] is None
+
+
 def test_recuperacao_fora_do_ar_da_503_e_nao_500(monkeypatch, cli):
     fingir_recuperacao(monkeypatch, erro=requests.ConnectionError("down"))
     r = cli.post("/perguntar", json={"pergunta": "q"})
